@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, lazy, Suspense } from 'react'
 import { RefreshCw, Plus, Loader, AlertCircle, PackageOpen } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useGuns } from '../hooks/useGuns'
 import GUNS_LOCAL from '../data/guns'
 import GunCard from '../components/gun/GunCard'
-import GunDetail from '../components/gun/GunDetail'
 import AdvancedFilter from '../components/common/AdvancedFilter'
+import Pagination from '../components/common/Pagination'
 import ConfirmModal from '../components/modals/ConfirmModal'
 import gunService from '../services/gunService'
 import {
@@ -14,6 +15,12 @@ import {
   extractCategories,
 } from '../utils/helpers'
 
+// Lazy load detail view fallback jika dipakai secara standalone
+const GunDetail = lazy(() => import('../components/gun/GunDetail'))
+
+// Jumlah produk per halaman
+const PAGE_SIZE = 6
+
 /**
  * Catalog page — the main product listing.
  *
@@ -21,11 +28,12 @@ import {
  *   1. Live API via useGuns()
  *   2. Local static array (GUNS_LOCAL) when the API is unreachable
  *
- * Features: search, category filter, sort, CRUD actions, detail modal.
+ * Features: search, category filter, sort, pagination, CRUD actions, detail view.
  */
 export default function Catalog({ onNavigate }) {
-  // ---- API data ----
+  // ---- API data (menggunakan TanStack Query caching) ----
   const { guns: apiGuns, loading, error, refetch } = useGuns({ limit: 50 })
+  const queryClient = useQueryClient()
   const [useLocal, setUseLocal] = useState(false)
 
   // Decide data source
@@ -43,6 +51,9 @@ export default function Catalog({ onNavigate }) {
   const [sortKey, setSortKey] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
 
+  // ---- pagination ----
+  const [page, setPage] = useState(1)
+
   const categories = useMemo(() => extractCategories(rawGuns), [rawGuns])
 
   const filteredGuns = useMemo(() => {
@@ -52,7 +63,20 @@ export default function Catalog({ onNavigate }) {
     return sortItems(result, sortKey, sortOrder)
   }, [rawGuns, search, activeCategory, sortKey, sortOrder])
 
-  // ---- detail view ----
+  // Hitung halaman dan ambil produk untuk halaman aktif
+  const totalPages = Math.max(1, Math.ceil(filteredGuns.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedGuns = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE
+    return filteredGuns.slice(start, start + PAGE_SIZE)
+  }, [filteredGuns, currentPage])
+
+  const handlePage = (p) => {
+    setPage(p)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // ---- detail view fallback (jika tidak via onNavigate) ----
   const [selectedGun, setSelectedGun] = useState(null)
 
   // ---- delete ----
@@ -67,7 +91,7 @@ export default function Catalog({ onNavigate }) {
       setDeleteError('')
       await gunService.deleteGun(deleteTarget.id)
       setDeleteTarget(null)
-      refetch()
+      queryClient.invalidateQueries({ queryKey: ['guns'] })
     } catch (err) {
       setDeleteError(err.message || 'Failed to delete.')
     } finally {
@@ -75,15 +99,24 @@ export default function Catalog({ onNavigate }) {
     }
   }
 
-  // ---- If viewing a single product detail ----
+  // ---- If viewing a single product detail fallback ----
   if (selectedGun) {
     return (
-      <GunDetail
-        gun={selectedGun}
-        onBack={() => setSelectedGun(null)}
-        onEdit={(g) => onNavigate && onNavigate('Edit', g)}
-        onDelete={(g) => { setSelectedGun(null); setDeleteTarget(g) }}
-      />
+      <Suspense
+        fallback={
+          <div className="state-box">
+            <Loader size={28} className="spin" />
+            <p>Memuat detail hardware…</p>
+          </div>
+        }
+      >
+        <GunDetail
+          gun={selectedGun}
+          onBack={() => setSelectedGun(null)}
+          onEdit={(g) => onNavigate && onNavigate('Edit', g)}
+          onDelete={(g) => { setSelectedGun(null); setDeleteTarget(g) }}
+        />
+      </Suspense>
     )
   }
 
@@ -101,10 +134,24 @@ export default function Catalog({ onNavigate }) {
       <section>
         <div className="list-head">
           <h2>Current stock</h2>
-          <div className="list-head-right">
+          <div className="list-head-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="count">
               {filteredGuns.length} piece{filteredGuns.length !== 1 ? 's' : ''}
             </span>
+            <button
+              type="button"
+              className="btn btn--outline btn--sm"
+              onClick={() => {
+                console.info(
+                  '%c[QueryCache] Manual refresh dipicu oleh user -> Invalidate cache ["guns"]',
+                  'background: #eafaf1; color: #27ae60; font-weight: bold; padding: 2px 6px; border-radius: 3px;',
+                )
+                queryClient.invalidateQueries({ queryKey: ['guns'] })
+              }}
+              title="Refresh data dari server"
+            >
+              <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+            </button>
             {onNavigate && (
               <button
                 type="button"
@@ -117,16 +164,16 @@ export default function Catalog({ onNavigate }) {
           </div>
         </div>
 
-        {/* Filters */}
+        {/* Filters (halaman direset ke 1 saat filter berubah) */}
         <AdvancedFilter
           search={search}
-          onSearch={setSearch}
+          onSearch={(v) => { setSearch(v); setPage(1) }}
           categories={categories}
           activeCategory={activeCategory}
-          onCategory={setActiveCategory}
+          onCategory={(c) => { setActiveCategory(c); setPage(1) }}
           sortKey={sortKey}
           sortOrder={sortOrder}
-          onSort={({ key, order }) => { setSortKey(key); setSortOrder(order) }}
+          onSort={({ key, order }) => { setSortKey(key); setSortOrder(order); setPage(1) }}
         />
 
         {/* States */}
@@ -163,19 +210,26 @@ export default function Catalog({ onNavigate }) {
           </div>
         )}
 
-        {/* Product grid */}
+        {/* Product grid + pagination */}
         {filteredGuns.length > 0 && (
-          <ul className="stock">
-            {filteredGuns.map((gun) => (
-              <GunCard
-                key={gun.id || gun.name}
-                gun={gun}
-                onSelect={setSelectedGun}
-                onEdit={onNavigate ? (g) => onNavigate('Edit', g) : undefined}
-                onDelete={setDeleteTarget}
-              />
-            ))}
-          </ul>
+          <>
+            <ul className="stock">
+              {pagedGuns.map((gun) => (
+                <GunCard
+                  key={gun.id || gun.name}
+                  gun={gun}
+                  onSelect={onNavigate ? (g) => onNavigate('Detail', g) : setSelectedGun}
+                  onEdit={onNavigate ? (g) => onNavigate('Edit', g) : undefined}
+                  onDelete={setDeleteTarget}
+                />
+              ))}
+            </ul>
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPage={handlePage}
+            />
+          </>
         )}
 
         {useLocal && (

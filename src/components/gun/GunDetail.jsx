@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { ArrowLeft, Star, Send, Loader } from 'lucide-react'
 import FavoriteButton from '../common/FavoriteButton'
+import ShareButton from '../common/ShareButton'
 import { useReviews, useCreateReview } from '../../hooks/useReviews'
+import { useGunById } from '../../hooks/useGuns'
 import { getUserIdentifier } from '../../services/userService'
 import { formatPrice, averageRating } from '../../utils/helpers'
 
@@ -15,21 +17,25 @@ import { formatPrice, averageRating } from '../../utils/helpers'
  * @param {Function} [props.onDelete]— trigger delete flow
  */
 export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
-  const imgSrc = gun.image_url || gun.image || '/guns/pistol.svg'
-  const category = gun.type || gun.category || '—'
-  const caliber = gun.caliber || gun.difficulty || ''
-  const price = gun.price ?? gun.cook_time ?? 0
+  // Query caching: ambil detail lengkap dari cache jika ada / fetch jika belum
+  const { gun: fullGun } = useGunById(gun?.id)
+  const activeGun = fullGun || gun
 
-  // Reviews
-  const { reviews, loading: reviewsLoading, refetch: refetchReviews } = useReviews(gun.id)
+  const imgSrc = activeGun.image_url || activeGun.image || '/guns/pistol.svg'
+  const category = activeGun.type || activeGun.category || '—'
+  const caliber = activeGun.caliber || activeGun.difficulty || ''
+  const price = activeGun.price ?? activeGun.cook_time ?? 0
+
+  // Reviews dengan TanStack React Query caching
+  const { reviews, loading: reviewsLoading, refetch: refetchReviews } = useReviews(activeGun.id)
   const { createReview, loading: submitting } = useCreateReview()
   const [rating, setRating] = useState(5)
   const [comment, setComment] = useState('')
   const [reviewError, setReviewError] = useState('')
   const [reviewSuccess, setReviewSuccess] = useState('')
 
-  const avgRating = gun.average_rating || averageRating(reviews)
-  const reviewCount = gun.review_count ?? reviews.length
+  const avgRating = activeGun.average_rating || averageRating(reviews)
+  const reviewCount = activeGun.review_count ?? reviews.length
 
   const handleSubmitReview = async (e) => {
     e.preventDefault()
@@ -41,7 +47,7 @@ export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
       return
     }
 
-    const result = await createReview(gun.id, {
+    const result = await createReview(activeGun.id, {
       user_identifier: getUserIdentifier(),
       rating,
       comment: comment.trim(),
@@ -66,9 +72,15 @@ export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
 
       {/* Hero */}
       <div className="detail-hero">
-        <img className="detail-img" src={imgSrc} alt={gun.name} />
+        <img
+          className="detail-img"
+          src={imgSrc}
+          alt={activeGun.name}
+          loading="lazy"
+          decoding="async"
+        />
         <div className="detail-info">
-          <h1 className="display">{gun.name}</h1>
+          <h1 className="display">{activeGun.name}</h1>
           <p className="type">
             {category}
             {caliber ? ` · ${caliber}` : ''}
@@ -83,14 +95,15 @@ export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
           )}
 
           <div className="detail-actions">
-            <FavoriteButton gunId={gun.id || gun.name} />
+            <FavoriteButton gunId={activeGun.id || activeGun.name} />
+            <ShareButton gun={activeGun} variant="button" />
             {onEdit && (
-              <button type="button" className="btn btn--outline" onClick={() => onEdit(gun)}>
+              <button type="button" className="btn btn--outline" onClick={() => onEdit(activeGun)}>
                 Edit
               </button>
             )}
             {onDelete && (
-              <button type="button" className="btn btn--danger" onClick={() => onDelete(gun)}>
+              <button type="button" className="btn btn--danger" onClick={() => onDelete(activeGun)}>
                 Delete
               </button>
             )}
@@ -101,15 +114,15 @@ export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
       {/* Description */}
       <section className="detail-section">
         <h2>Description</h2>
-        <p>{gun.description || 'No description available.'}</p>
+        <p>{activeGun.description || 'No description available.'}</p>
       </section>
 
       {/* Specifications (from ingredients / steps if present) */}
-      {gun.ingredients && gun.ingredients.length > 0 && (
+      {activeGun.ingredients && activeGun.ingredients.length > 0 && (
         <section className="detail-section">
           <h2>Specifications</h2>
           <ul className="detail-specs">
-            {gun.ingredients.map((ing, i) => (
+            {activeGun.ingredients.map((ing, i) => (
               <li key={ing.id || i}>
                 <strong>{ing.name}</strong> — {ing.quantity}
               </li>
@@ -118,11 +131,11 @@ export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
         </section>
       )}
 
-      {gun.steps && gun.steps.length > 0 && (
+      {activeGun.steps && activeGun.steps.length > 0 && (
         <section className="detail-section">
           <h2>Assembly / Maintenance Steps</h2>
           <ol className="detail-steps">
-            {gun.steps.map((step, i) => (
+            {activeGun.steps.map((step, i) => (
               <li key={step.id || i}>
                 {step.instruction || step}
               </li>
@@ -167,7 +180,7 @@ export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
           <button
             type="submit"
             className="btn btn--primary"
-            disabled={submitting || !gun.id}
+            disabled={submitting || !activeGun.id}
           >
             {submitting ? (
               <><Loader size={16} className="spin" /> Submitting…</>
@@ -178,7 +191,7 @@ export default function GunDetail({ gun, onBack, onEdit, onDelete }) {
 
           {reviewError && <p className="form-error">{reviewError}</p>}
           {reviewSuccess && <p className="form-success">{reviewSuccess}</p>}
-          {!gun.id && (
+          {!activeGun.id && (
             <p className="form-hint">
               Reviews require a server-generated product ID. This product is local-only.
             </p>

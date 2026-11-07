@@ -1,4 +1,5 @@
 import FavoriteButton from '../common/FavoriteButton'
+import ShareButton from '../common/ShareButton'
 import { formatPrice, truncate } from '../../utils/helpers'
 
 /**
@@ -16,6 +17,17 @@ export default function GunCard({ gun, onSelect, onEdit, onDelete }) {
   const caliber = gun.caliber || gun.difficulty || ''
   const price = gun.price ?? gun.cook_time ?? 0
 
+  // SEMENTARA untuk demo: URL gambar dibuat unik per produk supaya
+  // tiap produk muncul sebagai request terpisah di tab Network.
+  // Hapus baris ini dan pakai src={imgSrc} setelah rekaman selesai.
+  const demoSrc = imgSrc.startsWith('data:') ? imgSrc : `${imgSrc}?produk=${gun.id}`
+
+  // Log saat gambar benar-benar dimuat (bukti lazy load)
+  const handleImageLoad = () => {
+    const sumber = imgSrc.startsWith('data:') ? 'data:image (base64)' : imgSrc
+    console.info(`[LazyImage] Gambar dimuat: ${gun.name} (${sumber})`)
+  }
+
   return (
     <li className="card">
       <button
@@ -26,11 +38,12 @@ export default function GunCard({ gun, onSelect, onEdit, onDelete }) {
       >
         <img
           className="card-img"
-          src={imgSrc}
+          src={demoSrc}
           alt={gun.name}
           width="240"
           height="180"
           loading="lazy"
+          onLoad={handleImageLoad}
         />
 
         <span className="name display">{gun.name}</span>
@@ -50,6 +63,7 @@ export default function GunCard({ gun, onSelect, onEdit, onDelete }) {
       {/* Floating actions row */}
       <div className="card-actions">
         <FavoriteButton gunId={gun.id || gun.name} />
+        <ShareButton gun={gun} />
 
         {onEdit && (
           <button

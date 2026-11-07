@@ -1,90 +1,102 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import gunService from '../services/gunService'
 
-// ---------------------------------------------------------------------------
-// useGuns — fetch the paginated / filtered product list from the API.
-//
-// Returns { guns, loading, error, pagination, refetch }.
-// When the API is unreachable the `error` string will be set and `guns`
-// will remain an empty array so the UI can show a proper error state.
-// ---------------------------------------------------------------------------
+const EMPTY = []
 
 export function useGuns(params = {}) {
-  const [guns, setGuns] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [pagination, setPagination] = useState(null)
-
-  // Serialise params so the effect re-runs when they change.
-  const paramKey = JSON.stringify(params)
-
-  const fetchGuns = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
+  const query = useQuery({
+    queryKey: ['guns', params],
+    queryFn: async () => {
+      console.info(
+        '%c[QueryCache] Ambil katalog produk dari SERVER (Supabase)',
+        'background: #eafaf1; color: #27ae60; font-weight: bold; padding: 2px 6px; border-radius: 3px;',
+      )
       const response = await gunService.getGuns(params)
-
-      if (response.success) {
-        setGuns(response.data || [])
-        setPagination(response.pagination || null)
-      } else {
-        setError(response.message || 'Failed to fetch products.')
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to fetch products.')
       }
-    } catch (err) {
-      setError(err.message || 'An error occurred while fetching products.')
-      setGuns([])
-    } finally {
-      setLoading(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paramKey])
+      return response
+    },
+  })
 
-  useEffect(() => {
-    fetchGuns()
-  }, [fetchGuns])
-
-  return { guns, loading, error, pagination, refetch: fetchGuns }
+  return {
+    guns: query.data?.data ?? EMPTY,
+    loading: query.isLoading,
+    error: query.error ? query.error.message : null,
+    pagination: query.data?.pagination ?? null,
+    refetch: query.refetch,
+    isFetching: query.isFetching,
+  }
 }
 
-// ---------------------------------------------------------------------------
-// useGunById — fetch a single product by its UUID.
-//
-// Returns { gun, loading, error, refetch }.
-// ---------------------------------------------------------------------------
-
 export function useGunById(id) {
-  const [gun, setGun] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const isServerId = Boolean(id) && !String(id).startsWith('local-')
 
-  const fetchGun = useCallback(async () => {
-    if (!id) {
-      setLoading(false)
-      return
-    }
-    try {
-      setLoading(true)
-      setError(null)
-
+  const query = useQuery({
+    queryKey: ['gun', String(id)],
+    queryFn: async () => {
+      console.info(
+        `%c[QueryCache] Ambil detail produk #${id} dari SERVER`,
+        'background: #eafaf1; color: #27ae60; font-weight: bold; padding: 2px 6px; border-radius: 3px;',
+      )
       const response = await gunService.getGunById(id)
-
-      if (response.success) {
-        setGun(response.data)
-      } else {
-        setError(response.message || 'Product not found.')
+      if (!response.success) {
+        throw new Error(response.message || 'Product not found.')
       }
-    } catch (err) {
-      setError(err.message || 'Failed to load product details.')
-      setGun(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [id])
+      return response.data
+    },
+    enabled: isServerId,
+  })
 
-  useEffect(() => {
-    fetchGun()
-  }, [fetchGun])
+  return {
+    gun: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error ? query.error.message : null,
+    refetch: query.refetch,
+    isFetching: query.isFetching,
+  }
+}
 
-  return { gun, loading, error, refetch: fetchGun }
+export function useCreateGun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data) => gunService.createGun(data),
+    onSuccess: () => {
+      console.info(
+        '%c[QueryCache] Invalidate cache ["guns"] setelah CREATE',
+        'color: #c0392b; font-weight: bold;',
+      )
+      queryClient.invalidateQueries({ queryKey: ['guns'] })
+    },
+  })
+}
+
+export function useUpdateGun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }) => gunService.updateGun(id, data),
+    onSuccess: (_, { id }) => {
+      console.info(
+        `%c[QueryCache] Invalidate cache ["guns"] dan ["gun", "${id}"] setelah UPDATE`,
+        'color: #c0392b; font-weight: bold;',
+      )
+      queryClient.invalidateQueries({ queryKey: ['guns'] })
+      queryClient.invalidateQueries({ queryKey: ['gun', String(id)] })
+    },
+  })
+}
+
+export function useDeleteGun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => gunService.deleteGun(id),
+    onSuccess: (_, id) => {
+      console.info(
+        `%c[QueryCache] Invalidate cache ["guns"] dan remove ["gun", "${id}"] setelah DELETE`,
+        'color: #c0392b; font-weight: bold;',
+      )
+      queryClient.invalidateQueries({ queryKey: ['guns'] })
+      queryClient.removeQueries({ queryKey: ['gun', String(id)] })
+    },
+  })
 }
