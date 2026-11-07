@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Bore & Barrel
 
 A dummy gunshop storefront built as a Progressive Web App. It runs offline
@@ -44,3 +45,6 @@ npm run lint     # oxlint
         ├── About.jsx
         └── Contact.jsx
 ```
+=======
+# Tugas-Pengganti-Modul-5-Prak-PPB
+>>>>>>> f4a89b9e6afe306880afdaf4ac50b059f77f4ea3
